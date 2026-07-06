@@ -208,7 +208,7 @@
 const SUPABASE_URL = "https://pvsoijmopdqozvutgtdm.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB2c29pam1vcGRxb3p2dXRndGRtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzMzE3NTEsImV4cCI6MjA5ODkwNzc1MX0.1QQIHTeIgwbsP5seSHvbPiCv_P4dxj9FQeT4Ej9MZ1Y";
 
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // client "usa e getta" per creare utenze senza toccare la sessione admin corrente
 const supabaseAction = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
@@ -251,7 +251,7 @@ async function doRichiedi(){
   const email = document.getElementById('req-email').value.trim();
   const msgEl = document.getElementById('auth-msg');
   if(!nome || !email){ showMsg(msgEl,'Ragione sociale ed email sono obbligatorie.','err'); return; }
-  const { error } = await supabase.from('librerie').insert({
+  const { error } = await sb.from('librerie').insert({
     ragione_sociale: nome,
     email: email,
     cod_cliente: document.getElementById('req-codcliente').value.trim() || null,
@@ -270,13 +270,13 @@ async function doLogin(){
   const password = document.getElementById('login-password').value;
   const msgEl = document.getElementById('auth-msg');
   if(!email || !password){ showMsg(msgEl,'Inserisci email e password.','err'); return; }
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if(error){ showMsg(msgEl,'Credenziali non valide.','err'); return; }
   await initSession(data.session);
 }
 
 async function doLogout(){
-  await supabase.auth.signOut();
+  await sb.auth.signOut();
   state = {...state, session:null, role:null, libreria:null, cart:[]};
   document.getElementById('app-screen').classList.add('hidden');
   document.getElementById('auth-screen').classList.remove('hidden');
@@ -299,7 +299,7 @@ async function initSession(session){
     renderAdminNav();
     goToAdminView('richieste');
   } else {
-    const { data: lib, error } = await supabase.from('librerie').select('*').eq('auth_user_id', session.user.id).maybeSingle();
+    const { data: lib, error } = await sb.from('librerie').select('*').eq('auth_user_id', session.user.id).maybeSingle();
     if(error || !lib){
       alert('Impossibile trovare la tua scheda libreria. Contatta PDE.');
       await doLogout();
@@ -327,7 +327,7 @@ async function initSession(session){
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
-  const { data } = await supabase.auth.getSession();
+  const { data } = await sb.auth.getSession();
   if(data.session) await initSession(data.session);
 });
 
@@ -364,7 +364,7 @@ async function goToLibraioView(view){
 async function renderSezioneLibraio(){
   const tipo = state.sezioneTipo;
   const tabellaMap = { giro:'giri', campagna:'campagne', proposta:'proposte' };
-  const { data: sezioni } = await supabase.from(tabellaMap[tipo]).select('*')
+  const { data: sezioni } = await sb.from(tabellaMap[tipo]).select('*')
     .eq('attivo', true)
     .or(`data_scadenza.is.null,data_scadenza.gte.${todayISO()}`)
     .order('created_at', { ascending:false });
@@ -392,7 +392,7 @@ async function renderSezioneLibraio(){
     picker.appendChild(chip);
   });
 
-  const { data: titoli } = await supabase.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('titolo');
+  const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('titolo');
   const cont = document.getElementById('titoli-container');
   if(!titoli || titoli.length===0){ cont.innerHTML = '<div class="card empty">Nessun titolo in questa sezione.</div>'; return; }
   cont.innerHTML = `<div class="titoli-grid">${titoli.map(t=>{
@@ -437,14 +437,14 @@ function toggleCart(){ document.getElementById('cart-panel').classList.toggle('h
 
 async function inviaOrdine(){
   if(state.cart.length===0){ alert('Il carrello è vuoto.'); return; }
-  const { data: ordine, error } = await supabase.from('ordini').insert({
+  const { data: ordine, error } = await sb.from('ordini').insert({
     libreria_id: state.libreria.id,
     sezione_tipo: state.sezioneTipo,
     sezione_id: state.sezioneAttiva,
   }).select().single();
   if(error){ alert('Errore invio ordine: '+error.message); return; }
   const dettaglio = state.cart.map(c=>({ ordine_id: ordine.id, ean:c.ean, titolo:c.titolo, editore:c.editore||null, prezzo:c.prezzo||null, quantita:c.quantita }));
-  const { error: err2 } = await supabase.from('ordini_dettaglio').insert(dettaglio);
+  const { error: err2 } = await sb.from('ordini_dettaglio').insert(dettaglio);
   if(err2){ alert('Errore salvataggio dettaglio: '+err2.message); return; }
   state.cart = [];
   updateCartUI();
@@ -456,7 +456,7 @@ async function inviaOrdine(){
 async function renderStoricoOrdini(){
   const main = document.getElementById('main');
   main.innerHTML = `<h1>Storico ordini</h1><div class="subtitle">I tuoi ordini inviati a PDE</div><div id="storico-list"></div>`;
-  const { data: ordini } = await supabase.from('ordini').select('*, ordini_dettaglio(*)').eq('libreria_id', state.libreria.id).order('created_at', { ascending:false });
+  const { data: ordini } = await sb.from('ordini').select('*, ordini_dettaglio(*)').eq('libreria_id', state.libreria.id).order('created_at', { ascending:false });
   const cont = document.getElementById('storico-list');
   if(!ordini || ordini.length===0){ cont.innerHTML = '<div class="card empty">Nessun ordine ancora inviato.</div>'; return; }
   cont.innerHTML = ordini.map(o=>`<div class="card" style="margin-bottom:12px">
@@ -481,7 +481,7 @@ async function goToAdminView(view){
 async function renderAdminRichieste(){
   const main = document.getElementById('main');
   main.innerHTML = `<h1>Richieste accesso</h1><div class="subtitle">Approva, blocca o gestisci le librerie</div><div id="richieste-list"></div>`;
-  const { data: librerie } = await supabase.from('librerie').select('*').order('created_at', { ascending:false });
+  const { data: librerie } = await sb.from('librerie').select('*').order('created_at', { ascending:false });
   const cont = document.getElementById('richieste-list');
   if(!librerie || librerie.length===0){ cont.innerHTML = '<div class="card empty">Nessuna richiesta.</div>'; return; }
   cont.innerHTML = `<table><thead><tr><th>Libreria</th><th>Email</th><th>Cod. cliente</th><th>Stato</th><th>Richiesta</th><th></th></tr></thead><tbody>
@@ -501,12 +501,12 @@ async function renderAdminRichieste(){
 }
 
 async function approvaLibreria(id){
-  const { data: lib } = await supabase.from('librerie').select('*').eq('id', id).single();
+  const { data: lib } = await sb.from('librerie').select('*').eq('id', id).single();
   if(!lib) return;
   const tempPassword = genPassword();
   const { data: authData, error } = await supabaseAction.auth.signUp({ email: lib.email, password: tempPassword });
   if(error){ alert('Errore creazione utenza: '+error.message); return; }
-  const { error: err2 } = await supabase.from('librerie').update({
+  const { error: err2 } = await sb.from('librerie').update({
     stato:'approvato', auth_user_id: authData.user.id, approvato_at: new Date().toISOString()
   }).eq('id', id);
   if(err2){ alert('Errore aggiornamento: '+err2.message); return; }
@@ -514,11 +514,11 @@ async function approvaLibreria(id){
   renderAdminRichieste();
 }
 async function bloccaLibreria(id){
-  await supabase.from('librerie').update({ stato:'bloccato' }).eq('id', id);
+  await sb.from('librerie').update({ stato:'bloccato' }).eq('id', id);
   renderAdminRichieste();
 }
 async function riattivaLibreria(id){
-  await supabase.from('librerie').update({ stato:'approvato' }).eq('id', id);
+  await sb.from('librerie').update({ stato:'approvato' }).eq('id', id);
   renderAdminRichieste();
 }
 function showCredentialsModal(email, password){
@@ -554,7 +554,7 @@ function setAdminTipo(tipo){ state.sezioneTipo = tipo; renderAdminSezioni(); }
 async function renderAdminSezioniList(){
   const tipo = state.sezioneTipo;
   const tabellaMap = { giro:'giri', campagna:'campagne', proposta:'proposte' };
-  const { data: sezioni } = await supabase.from(tabellaMap[tipo]).select('*').order('created_at', { ascending:false });
+  const { data: sezioni } = await sb.from(tabellaMap[tipo]).select('*').order('created_at', { ascending:false });
   const cont = document.getElementById('admin-sezioni-list');
   cont.innerHTML = `
     <div class="card" style="margin-bottom:16px">
@@ -586,22 +586,22 @@ async function creaSezione(){
   const nome = document.getElementById('new-sezione-nome').value.trim();
   const scadenza = document.getElementById('new-sezione-scadenza').value || null;
   if(!nome){ alert('Inserisci un nome.'); return; }
-  await supabase.from(tabellaMap[tipo]).insert({ nome, data_scadenza: scadenza });
+  await sb.from(tabellaMap[tipo]).insert({ nome, data_scadenza: scadenza });
   renderAdminSezioniList();
 }
 async function toggleSezioneAttiva(tabella, id, nuovoValore){
-  await supabase.from(tabella).update({ attivo: nuovoValore }).eq('id', id);
+  await sb.from(tabella).update({ attivo: nuovoValore }).eq('id', id);
   renderAdminSezioniList();
 }
 async function eliminaSezione(tabella, id){
   if(!confirm('Eliminare la sezione e tutti i suoi titoli?')) return;
-  await supabase.from('titoli').delete().eq('sezione_id', id);
-  await supabase.from(tabella).delete().eq('id', id);
+  await sb.from('titoli').delete().eq('sezione_id', id);
+  await sb.from(tabella).delete().eq('id', id);
   renderAdminSezioniList();
 }
 
 async function renderTitoliAdmin(tipo, sezioneId){
-  const { data: titoli } = await supabase.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', sezioneId).order('titolo');
+  const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', sezioneId).order('titolo');
   const cont = document.getElementById('titoli-admin-'+sezioneId);
   if(!cont) return;
   cont.innerHTML = `
@@ -630,11 +630,11 @@ async function aggiungiTitolo(tipo, sezioneId){
   const editore = document.getElementById(`nt-editore-${sezioneId}`).value.trim();
   const prezzo = document.getElementById(`nt-prezzo-${sezioneId}`).value;
   if(!ean || !titolo){ alert('EAN e titolo sono obbligatori.'); return; }
-  await supabase.from('titoli').insert({ sezione_tipo:tipo, sezione_id:sezioneId, ean, titolo, editore:editore||null, prezzo:prezzo||null });
+  await sb.from('titoli').insert({ sezione_tipo:tipo, sezione_id:sezioneId, ean, titolo, editore:editore||null, prezzo:prezzo||null });
   renderTitoliAdmin(tipo, sezioneId);
 }
 async function eliminaTitolo(id, tipo, sezioneId){
-  await supabase.from('titoli').delete().eq('id', id);
+  await sb.from('titoli').delete().eq('id', id);
   renderTitoliAdmin(tipo, sezioneId);
 }
 
@@ -659,7 +659,7 @@ async function renderAdminOrdini(){
 }
 async function renderAdminOrdiniList(){
   const filtro = document.getElementById('filtro-stato').value;
-  let query = supabase.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').order('created_at', { ascending:false });
+  let query = sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').order('created_at', { ascending:false });
   if(filtro) query = query.eq('stato', filtro);
   const { data: ordini } = await query;
   const cont = document.getElementById('ordini-admin-list');
@@ -699,16 +699,16 @@ function buildExportRows(ordini){
 async function scaricaOrdine(ordine){
   const rows = buildExportRows([ordine]);
   esportaExcel(rows, `ordine_${ordine.librerie?.ragione_sociale||'libreria'}_${ordine.id.slice(0,8)}`);
-  await supabase.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).eq('id', ordine.id);
+  await sb.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).eq('id', ordine.id);
   renderAdminOrdiniList();
 }
 async function scaricaSelezionati(){
   const ids = [...document.querySelectorAll('.ordine-check:checked')].map(c=>c.value);
   if(ids.length===0){ alert('Seleziona almeno un ordine.'); return; }
-  const { data: ordini } = await supabase.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ids);
+  const { data: ordini } = await sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ids);
   const rows = buildExportRows(ordini);
   esportaExcel(rows, `upload_rpn_${todayISO()}`);
-  await supabase.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).in('id', ids);
+  await sb.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).in('id', ids);
   renderAdminOrdiniList();
 }
 function esportaExcel(rows, filename){
@@ -738,8 +738,8 @@ async function renderAdminChat(){
   await renderAdminChatLibsList();
 }
 async function renderAdminChatLibsList(){
-  const { data: librerie } = await supabase.from('librerie').select('*').eq('stato','approvato').order('ragione_sociale');
-  const { data: nonLetti } = await supabase.from('chat_messaggi').select('libreria_id').eq('mittente','libreria').eq('letto_admin', false);
+  const { data: librerie } = await sb.from('librerie').select('*').eq('stato','approvato').order('ragione_sociale');
+  const { data: nonLetti } = await sb.from('chat_messaggi').select('libreria_id').eq('mittente','libreria').eq('letto_admin', false);
   const unreadMap = {};
   (nonLetti||[]).forEach(m=> unreadMap[m.libreria_id] = (unreadMap[m.libreria_id]||0)+1);
   const cont = document.getElementById('admin-chat-libs');
@@ -752,10 +752,10 @@ async function openAdminChat(id, nome){
   document.getElementById('admin-chat-inputrow').classList.remove('hidden');
   await renderAdminChatLibsList();
   await loadAdminChatMessages();
-  await supabase.from('chat_messaggi').update({ letto_admin:true }).eq('libreria_id', id).eq('mittente','libreria');
+  await sb.from('chat_messaggi').update({ letto_admin:true }).eq('libreria_id', id).eq('mittente','libreria');
 }
 async function loadAdminChatMessages(){
-  const { data: msgs } = await supabase.from('chat_messaggi').select('*').eq('libreria_id', state.chatWith).order('created_at');
+  const { data: msgs } = await sb.from('chat_messaggi').select('*').eq('libreria_id', state.chatWith).order('created_at');
   const cont = document.getElementById('admin-chat-messages');
   cont.innerHTML = (msgs||[]).map(m=>`<div class="bubble ${m.mittente}">${esc(m.testo)}<span class="time">${fmtDateTime(m.created_at)}</span></div>`).join('');
   cont.scrollTop = cont.scrollHeight;
@@ -764,7 +764,7 @@ async function sendAdminChatMessage(){
   const input = document.getElementById('admin-chat-input');
   const testo = input.value.trim();
   if(!testo || !state.chatWith) return;
-  await supabase.from('chat_messaggi').insert({ libreria_id: state.chatWith, mittente:'admin', testo });
+  await sb.from('chat_messaggi').insert({ libreria_id: state.chatWith, mittente:'admin', testo });
   input.value = '';
   await loadAdminChatMessages();
 }
@@ -775,23 +775,23 @@ function toggleChat(){
   if(!document.getElementById('chat-panel').classList.contains('hidden')) loadLibraioChatMessages();
 }
 async function loadLibraioChatMessages(){
-  const { data: msgs } = await supabase.from('chat_messaggi').select('*').eq('libreria_id', state.libreria.id).order('created_at');
+  const { data: msgs } = await sb.from('chat_messaggi').select('*').eq('libreria_id', state.libreria.id).order('created_at');
   const cont = document.getElementById('chat-messages');
   cont.innerHTML = (msgs||[]).map(m=>`<div class="bubble ${m.mittente}">${esc(m.testo)}<span class="time">${fmtDateTime(m.created_at)}</span></div>`).join('');
   cont.scrollTop = cont.scrollHeight;
-  await supabase.from('chat_messaggi').update({ letto_libreria:true }).eq('libreria_id', state.libreria.id).eq('mittente','admin');
+  await sb.from('chat_messaggi').update({ letto_libreria:true }).eq('libreria_id', state.libreria.id).eq('mittente','admin');
   document.getElementById('chat-badge').classList.add('hidden');
 }
 async function sendChatMessage(){
   const input = document.getElementById('chat-input');
   const testo = input.value.trim();
   if(!testo) return;
-  await supabase.from('chat_messaggi').insert({ libreria_id: state.libreria.id, mittente:'libreria', testo });
+  await sb.from('chat_messaggi').insert({ libreria_id: state.libreria.id, mittente:'libreria', testo });
   input.value = '';
   await loadLibraioChatMessages();
 }
 function subscribeChat(libreriaId){
-  state.chatChannel = supabase.channel('chat-'+libreriaId)
+  state.chatChannel = sb.channel('chat-'+libreriaId)
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'chat_messaggi', filter:`libreria_id=eq.${libreriaId}` }, payload => {
       if(payload.new.mittente === 'admin'){
         if(document.getElementById('chat-panel').classList.contains('hidden')){
