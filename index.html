@@ -52,7 +52,7 @@
   .auth-logo img.main-logo{height:100px;display:block;border-radius:10px;}
   .powered-by{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--testo-lieve);letter-spacing:.02em;margin-top:20px;}
   .powered-by img{height:20px;display:block;}
-  .side-powered{display:flex;align-items:center;gap:6px;font-size:10px;color:#8b96bd;margin:2px 18px 14px;}
+  .side-powered{display:flex;align-items:center;justify-content:center;gap:6px;font-size:10px;color:#8b96bd;margin:2px 18px 18px;}
   .side-powered img{height:15px;display:block;}
   .auth-tabs{display:flex;gap:6px;margin-bottom:18px;background:#e9edf5;border-radius:10px;padding:4px;}
   .auth-tabs button{flex:1;background:transparent;color:var(--testo-lieve);}
@@ -65,8 +65,8 @@
   /* APP LAYOUT */
   #app-screen{display:flex;min-height:100vh;}
   #sidebar{width:220px;background:var(--blu);color:#fff;display:flex;flex-direction:column;flex-shrink:0;}
-  .side-logo{background:#fff;border-radius:6px;height:22px;display:flex;align-items:center;padding:4px 12px;margin:18px;width:fit-content;}
-  .side-logo img{height:22px;display:block;}
+  .side-logo{padding:20px 18px 4px;display:flex;justify-content:center;}
+  .side-logo img{width:100%;max-width:184px;display:block;}
   #sidebar nav{flex:1;padding:0 12px;}
   #sidebar nav button{display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;color:#c7cfe6;margin-bottom:4px;font-weight:500;}
   #sidebar nav button.active{background:rgba(255,255,255,.12);color:#fff;}
@@ -155,7 +155,11 @@
     <div id="form-richiedi" class="card hidden">
       <div class="field"><label>Ragione sociale libreria *</label><input id="req-nome"></div>
       <div class="field"><label>Email *</label><input id="req-email" type="email"></div>
-      <div class="field"><label>Codice cliente (se lo conosci)</label><input id="req-codcliente"></div>
+      <div class="grid2">
+        <div class="field"><label>Città</label><input id="req-citta"></div>
+        <div class="field"><label>Partita IVA</label><input id="req-piva"></div>
+      </div>
+      <div class="field"><label>Codice MELI (se in possesso)</label><input id="req-codcliente"></div>
       <div class="field"><label>Telefono</label><input id="req-telefono"></div>
       <div class="field"><label>Indirizzo</label><input id="req-indirizzo"></div>
       <button class="primary" style="width:100%" onclick="doRichiedi()">Invia richiesta</button>
@@ -169,7 +173,7 @@
 <!-- ======================= APP SCREEN ======================= -->
 <div id="app-screen" class="hidden">
   <div id="sidebar">
-    <div class="side-logo"><img src="shop_per_librai_logo.png" alt="Shop per Librai" style="height:22px;object-fit:contain"></div>
+    <div class="side-logo"><img src="shop_per_librai_logo.png" alt="Shop per Librai"></div>
     <div class="side-powered">powered by <img src="logo_pde.png" alt="PDE" onerror="this.style.display='none'"></div>
     <nav id="nav-links"></nav>
     <div class="who">
@@ -257,6 +261,8 @@ async function doRichiedi(){
     cod_cliente: document.getElementById('req-codcliente').value.trim() || null,
     telefono: document.getElementById('req-telefono').value.trim() || null,
     indirizzo: document.getElementById('req-indirizzo').value.trim() || null,
+    citta: document.getElementById('req-citta').value.trim() || null,
+    partita_iva: document.getElementById('req-piva').value.trim() || null,
   });
   if(error){
     showMsg(msgEl, error.message.includes('duplicate') ? 'Esiste già una richiesta con questa email.' : error.message, 'err');
@@ -484,20 +490,30 @@ async function renderAdminRichieste(){
   const { data: librerie } = await sb.from('librerie').select('*').order('created_at', { ascending:false });
   const cont = document.getElementById('richieste-list');
   if(!librerie || librerie.length===0){ cont.innerHTML = '<div class="card empty">Nessuna richiesta.</div>'; return; }
-  cont.innerHTML = `<table><thead><tr><th>Libreria</th><th>Email</th><th>Cod. cliente</th><th>Stato</th><th>Richiesta</th><th></th></tr></thead><tbody>
-    ${librerie.map(l=>`<tr>
-      <td>${esc(l.ragione_sociale)}</td>
-      <td>${esc(l.email)}</td>
-      <td>${esc(l.cod_cliente||'-')}</td>
-      <td><span class="badge ${l.stato}">${l.stato}</span></td>
-      <td>${fmtDate(l.created_at)}</td>
-      <td style="white-space:nowrap">
-        ${l.stato==='in_attesa' ? `<button class="primary small" onclick="approvaLibreria('${l.id}')">Approva</button>` : ''}
-        ${l.stato==='approvato' ? `<button class="ghost small" onclick="bloccaLibreria('${l.id}')">Blocca</button>` : ''}
-        ${l.stato==='bloccato' ? `<button class="ghost small" onclick="riattivaLibreria('${l.id}')">Riattiva</button>` : ''}
-      </td>
-    </tr>`).join('')}
-  </tbody></table>`;
+  cont.innerHTML = librerie.map(l=>`
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px">
+        <div>
+          <div style="font-size:16px;font-weight:700">${esc(l.ragione_sociale)}</div>
+          <div style="font-size:12px;color:var(--testo-lieve);margin-top:2px">Richiesta il ${fmtDate(l.created_at)}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span class="badge ${l.stato}">${l.stato}</span>
+          ${l.stato==='in_attesa' ? `<button class="primary small" onclick="approvaLibreria('${l.id}')">Approva</button>` : ''}
+          ${l.stato==='approvato' ? `<button class="ghost small" onclick="bloccaLibreria('${l.id}')">Blocca</button>` : ''}
+          ${l.stato==='bloccato' ? `<button class="ghost small" onclick="riattivaLibreria('${l.id}')">Riattiva</button>` : ''}
+        </div>
+      </div>
+      <div class="grid2" style="margin-top:14px;font-size:13.5px">
+        <div><span style="color:var(--testo-lieve)">Email</span><br>${esc(l.email)}</div>
+        <div><span style="color:var(--testo-lieve)">Telefono</span><br>${esc(l.telefono||'-')}</div>
+        <div><span style="color:var(--testo-lieve)">Città</span><br>${esc(l.citta||'-')}</div>
+        <div><span style="color:var(--testo-lieve)">Partita IVA</span><br>${esc(l.partita_iva||'-')}</div>
+        <div><span style="color:var(--testo-lieve)">Codice MELI</span><br>${esc(l.cod_cliente||'-')}</div>
+        <div><span style="color:var(--testo-lieve)">Indirizzo</span><br>${esc(l.indirizzo||'-')}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
 async function approvaLibreria(id){
