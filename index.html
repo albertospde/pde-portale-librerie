@@ -6,6 +6,7 @@
 <title>PDE Portale Librerie</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <style>
   :root{
     --blu:#1a2d6b;
@@ -434,6 +435,8 @@ async function renderSezioneLibraio(){
   const editoriDisponibili = [...new Set(titoli.map(t=>t.editore).filter(Boolean))].sort();
   cont.innerHTML = `
     <div class="toolbar">
+      <input id="barcode-scan" placeholder="📷 Scansiona o digita EAN e premi Invio" style="max-width:260px" autocomplete="off" onkeydown="if(event.key==='Enter'){handleBarcodeScan(this.value);this.value='';}">
+      <button class="ghost" onclick="apriScannerFotocamera()">📱 Fotocamera</button>
       <input id="cat-search" placeholder="Cerca per EAN, titolo, autore o editore..." style="max-width:320px" value="${esc(state.catalogoSearch||'')}" oninput="state.catalogoSearch=this.value;state.catalogoPage=1;renderCatalogoGrid()">
       <div style="position:relative">
         <button class="ghost" onclick="document.getElementById('filtro-editore-panel').classList.toggle('hidden')">🏷 Filtra editore ${state.catalogoEditoriSel.length ? `(${state.catalogoEditoriSel.length})` : ''}</button>
@@ -447,8 +450,10 @@ async function renderSezioneLibraio(){
         </div>
       </div>
     </div>
+    <div id="scan-feedback"></div>
     <div id="catalogo-grid"></div>
     <div id="catalogo-paginazione" style="display:flex;justify-content:center;align-items:center;gap:12px;margin-top:16px"></div>
+  <!-- barcode input riprende focus automaticamente per scansioni rapide consecutive -->
   `;
   renderCatalogoGrid();
 }
@@ -526,6 +531,56 @@ function mostraCopertinaGrande(ean, titolo){
     <div style="color:#fff;margin-top:10px;font-size:14px">${esc(titolo)}</div>
   </div>`;
   document.body.appendChild(overlay);
+}
+
+/* --- SCANSIONE CODICI A BARRE (lettore fisico o fotocamera) --- */
+function handleBarcodeScan(codice){
+  codice = (codice||'').trim();
+  if(!codice) return;
+  const feedback = document.getElementById('scan-feedback');
+  const t = (state.catalogoTitoli||[]).find(x => x.ean === codice);
+  if(!t){
+    if(feedback) feedback.innerHTML = `<div class="msg err">Nessun titolo trovato con EAN ${esc(codice)} in questa sezione.</div>`;
+    return;
+  }
+  const inCart = state.cart.find(c=>c.ean===t.ean);
+  const nuovaQty = (inCart ? inCart.quantita : 0) + 1;
+  setQty(t.ean, t.titolo, t.autore, t.editore, t.prezzo, t.cedola, nuovaQty);
+  if(feedback) feedback.innerHTML = `<div class="msg ok">✓ Aggiunto: ${esc(t.titolo)} (qtà ${nuovaQty})</div>`;
+  // aggiorno anche la quantità visibile a schermo, se il titolo è nella pagina corrente
+  const qtyInput = document.getElementById('qty-'+t.ean);
+  if(qtyInput) qtyInput.value = nuovaQty;
+  setTimeout(()=>{ if(feedback) feedback.innerHTML=''; }, 3000);
+}
+
+let scannerFotocamera = null;
+function apriScannerFotocamera(){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'scanner-overlay';
+  overlay.innerHTML = `<div class="modal-box" style="max-width:420px">
+    <h3>Scansiona con la fotocamera</h3>
+    <div id="scanner-reader" style="width:100%"></div>
+    <p style="font-size:12px;color:var(--testo-lieve);margin-top:10px">Inquadra il codice a barre del libro. Si aggiunge da solo al carrello.</p>
+    <button class="ghost" style="width:100%;margin-top:10px" onclick="chiudiScannerFotocamera()">Chiudi</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  scannerFotocamera = new Html5Qrcode('scanner-reader');
+  scannerFotocamera.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: { width: 250, height: 120 } },
+    (decodedText) => { handleBarcodeScan(decodedText); },
+    () => {}
+  ).catch(err => {
+    document.getElementById('scanner-reader').innerHTML = `<div class="msg err">Impossibile accedere alla fotocamera: ${esc(err.toString())}</div>`;
+  });
+}
+function chiudiScannerFotocamera(){
+  if(scannerFotocamera){
+    scannerFotocamera.stop().then(()=>scannerFotocamera.clear()).catch(()=>{});
+    scannerFotocamera = null;
+  }
+  document.getElementById('scanner-overlay')?.remove();
 }
 
 function changeQty(ean, titolo, autore, editore, prezzo, cedola, delta){
