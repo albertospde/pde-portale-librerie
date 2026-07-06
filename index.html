@@ -484,7 +484,7 @@ function renderCatalogoGrid(){
   const start = (state.catalogoPage-1) * TITOLI_PER_PAGINA;
   const titoli = filtrati.slice(start, start + TITOLI_PER_PAGINA);
 
-  grid.innerHTML = `<div class="titoli-grid">${titoli.map(t=>{
+  grid.innerHTML = `<div class="titoli-grid">${titoli.map((t,idx)=>{
     const inCart = state.cart.find(c=>c.ean===t.ean);
     const qty = inCart ? inCart.quantita : 0;
     const iconaHtml = isGiro
@@ -507,7 +507,7 @@ function renderCatalogoGrid(){
         <div class="m">${meta}</div>
         ${extra?`<div class="m">${extra}</div>`:''}
       </div>
-      <svg id="bc-${esc(t.ean)}" class="barcode-svg" style="flex-shrink:0"></svg>
+      <svg id="bc-riga-${idx}" data-ean="${esc(t.ean)}" class="barcode-svg" style="flex-shrink:0"></svg>
       <div class="qty-box">
         <button class="ghost small" onclick="changeQty('${t.ean}', ${JSON.stringify(t.titolo).replace(/"/g,'&quot;')}, '${t.autore||''}', '${t.editore||''}', ${t.prezzo||0}, '${t.cedola||''}', -1)">−</button>
         <input type="number" min="0" value="${qty}" id="qty-${t.ean}" onchange="setQty('${t.ean}', ${JSON.stringify(t.titolo).replace(/"/g,'&quot;')}, '${t.autore||''}', '${t.editore||''}', ${t.prezzo||0}, '${t.cedola||''}', this.value)">
@@ -545,8 +545,8 @@ function isEan13Valido(codice){
   return checkAtteso === cifre[12];
 }
 function generaBarcodeVisibili(titoli){
-  titoli.forEach(t=>{
-    const el = document.getElementById('bc-'+t.ean);
+  titoli.forEach((t,idx)=>{
+    const el = document.getElementById('bc-riga-'+idx);
     if(!el) return;
     try{
       JsBarcode(el, t.ean, {
@@ -558,7 +558,8 @@ function generaBarcodeVisibili(titoli){
         displayValue: true,
       });
     }catch(e){
-      el.outerHTML = `<span style="font-size:11px;color:var(--testo-lieve)">EAN non valido per barcode</span>`;
+      console.error('Barcode non generato per EAN', t.ean, e);
+      el.outerHTML = `<span style="font-size:11px;color:var(--testo-lieve)" title="${esc(e.message||'')}">Barcode non generato</span>`;
     }
   });
 }
