@@ -47,12 +47,12 @@
   /* AUTH SCREEN */
   #auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
   .auth-box{width:100%;max-width:420px;}
-  .auth-logo{display:flex;flex-direction:column;align-items:center;gap:10px;margin:0 auto 22px;}
-  .auth-logo img.main-logo{height:70px;display:block;}
-  .powered-by{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--testo-lieve);letter-spacing:.02em;}
-  .powered-by img{height:16px;display:block;background:#fff;border-radius:4px;padding:2px 5px;}
+  .auth-logo{display:flex;justify-content:center;margin:0 auto 26px;}
+  .auth-logo img.main-logo{height:100px;display:block;filter:drop-shadow(0 2px 6px rgba(26,45,107,.08));}
+  .powered-by{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--testo-lieve);letter-spacing:.02em;margin-top:20px;}
+  .powered-by img{height:20px;display:block;}
   .side-powered{display:flex;align-items:center;gap:6px;font-size:10px;color:#8b96bd;margin:2px 18px 14px;}
-  .side-powered img{height:14px;display:block;background:#fff;border-radius:3px;padding:1px 4px;}
+  .side-powered img{height:15px;display:block;}
   .auth-tabs{display:flex;gap:6px;margin-bottom:18px;background:#e9edf5;border-radius:10px;padding:4px;}
   .auth-tabs button{flex:1;background:transparent;color:var(--testo-lieve);}
   .auth-tabs button.active{background:#fff;color:var(--blu);box-shadow:0 1px 3px rgba(0,0,0,.08);}
@@ -138,7 +138,6 @@
   <div class="auth-box">
     <div class="auth-logo">
       <img class="main-logo" src="shop_per_librai_logo.png" alt="Shop per Librai">
-      <div class="powered-by">powered by <img src="logo_pde.png" alt="PDE" onerror="this.style.display='none'"></div>
     </div>
     <div class="auth-tabs">
       <button id="tab-login" class="active" onclick="switchAuthTab('login')">Accedi</button>
@@ -161,6 +160,8 @@
       <button class="primary" style="width:100%" onclick="doRichiedi()">Invia richiesta</button>
       <p style="font-size:12px;color:var(--testo-lieve);margin-top:12px">Riceverai le credenziali da PDE dopo l'approvazione della richiesta.</p>
     </div>
+
+    <div class="powered-by">powered by <img src="logo_pde.png" alt="PDE" onerror="this.style.display='none'"></div>
   </div>
 </div>
 
