@@ -399,10 +399,49 @@ async function renderSezioneLibraio(){
   });
 
   const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('titolo');
+  state.catalogoTitoli = titoli || [];
+  if(!state.catalogoEditoriSel) state.catalogoEditoriSel = [];
   const cont = document.getElementById('titoli-container');
   if(!titoli || titoli.length===0){ cont.innerHTML = '<div class="card empty">Nessun titolo in questa sezione.</div>'; return; }
-  const isGiro = tipo === 'giro';
-  cont.innerHTML = `<div class="titoli-grid">${titoli.map(t=>{
+
+  const editoriDisponibili = [...new Set(titoli.map(t=>t.editore).filter(Boolean))].sort();
+  cont.innerHTML = `
+    <div class="toolbar">
+      <input id="cat-search" placeholder="Cerca per EAN, titolo, autore o editore..." style="max-width:320px" value="${esc(state.catalogoSearch||'')}" oninput="state.catalogoSearch=this.value;renderCatalogoGrid()">
+      <div style="position:relative">
+        <button class="ghost" onclick="document.getElementById('filtro-editore-panel').classList.toggle('hidden')">🏷 Filtra editore ${state.catalogoEditoriSel.length ? `(${state.catalogoEditoriSel.length})` : ''}</button>
+        <div id="filtro-editore-panel" class="hidden" style="position:absolute;top:calc(100% + 6px);left:0;background:#fff;border:1px solid var(--grigio-line);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.12);padding:12px;z-index:20;min-width:220px;max-height:260px;overflow-y:auto">
+          ${editoriDisponibili.map(ed=>`
+            <label style="display:flex;align-items:center;gap:8px;padding:5px 2px;font-size:13px;cursor:pointer">
+              <input type="checkbox" value="${esc(ed)}" ${state.catalogoEditoriSel.includes(ed)?'checked':''} onchange="toggleEditoreFiltro('${esc(ed)}')"> ${esc(ed)}
+            </label>
+          `).join('') || '<span style="font-size:12px;color:var(--testo-lieve)">Nessun editore disponibile</span>'}
+          ${state.catalogoEditoriSel.length ? `<button class="ghost small" style="width:100%;margin-top:8px" onclick="state.catalogoEditoriSel=[];renderSezioneLibraio()">Azzera filtro</button>` : ''}
+        </div>
+      </div>
+    </div>
+    <div id="catalogo-grid"></div>
+  `;
+  renderCatalogoGrid();
+}
+function toggleEditoreFiltro(ed){
+  const i = state.catalogoEditoriSel.indexOf(ed);
+  if(i>=0) state.catalogoEditoriSel.splice(i,1); else state.catalogoEditoriSel.push(ed);
+  renderCatalogoGrid();
+}
+function renderCatalogoGrid(){
+  const isGiro = state.sezioneTipo === 'giro';
+  const q = (state.catalogoSearch||'').trim().toLowerCase();
+  const sel = state.catalogoEditoriSel||[];
+  const titoli = (state.catalogoTitoli||[]).filter(t=>{
+    const matchQ = !q || [t.ean,t.titolo,t.autore,t.editore].some(v=>v && v.toString().toLowerCase().includes(q));
+    const matchEd = sel.length===0 || sel.includes(t.editore);
+    return matchQ && matchEd;
+  });
+  const grid = document.getElementById('catalogo-grid');
+  if(!grid) return;
+  if(titoli.length===0){ grid.innerHTML = '<div class="card empty">Nessun titolo corrisponde ai filtri.</div>'; return; }
+  grid.innerHTML = `<div class="titoli-grid">${titoli.map(t=>{
     const inCart = state.cart.find(c=>c.ean===t.ean);
     const qty = inCart ? inCart.quantita : 0;
     const iconaHtml = isGiro
@@ -411,8 +450,9 @@ async function renderSezioneLibraio(){
     return `<div class="titolo-row">
       <div style="flex-shrink:0;width:38px;display:flex;justify-content:center">${iconaHtml}</div>
       <div class="titolo-info">
+        <div class="m" style="font-size:11.5px">EAN ${esc(t.ean)}</div>
         <div class="t">${esc(t.titolo)}</div>
-        <div class="m">EAN ${esc(t.ean)} ${t.autore?'· '+esc(t.autore):''} ${t.editore?'· '+esc(t.editore):''} ${t.prezzo?'· € '+Number(t.prezzo).toFixed(2):''}</div>
+        <div class="m">${t.autore?esc(t.autore)+' · ':''}${t.editore?esc(t.editore):''} ${t.prezzo?'· € '+Number(t.prezzo).toFixed(2):''}</div>
         ${t.note?`<div class="m">Note: ${esc(t.note)}</div>`:''}
         ${t.gemelli?`<div class="m">Gemelli: ${esc(t.gemelli)}</div>`:''}
       </div>
@@ -754,14 +794,14 @@ async function renderTitoliAdmin(tipo, sezioneId){
   const isGiro = tipo === 'giro';
   cont.innerHTML = `
     <table>
-      <thead><tr><th>EAN</th><th></th><th>Titolo</th><th>Autore</th><th>Editore</th><th>Prezzo</th><th>Note</th><th>Gemelli</th><th></th></tr></thead>
+      <thead><tr><th></th><th>EAN</th><th>Titolo</th><th>Autore</th><th>Editore</th><th>Prezzo</th><th>Note</th><th>Gemelli</th><th></th></tr></thead>
       <tbody>
         ${(titoli||[]).map(t=>`<tr>
-          <td>${esc(t.ean)}</td>
           <td>${isGiro
             ? `<button class="ghost small" title="Apri PDF" onclick="window.open('${PDF_BUCKET_URL}${encodeURIComponent(t.ean)}.pdf','_blank')">📄</button>`
             : `<img src="${coverUrl(t.ean)}" alt="" style="width:28px;height:40px;object-fit:cover;border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,.25)" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📕',style:'font-size:20px'}))">`
           }</td>
+          <td>${esc(t.ean)}</td>
           <td>${esc(t.titolo)}</td>
           <td>${esc(t.autore||'-')}</td>
           <td>${esc(t.editore||'-')}</td>
@@ -771,8 +811,8 @@ async function renderTitoliAdmin(tipo, sezioneId){
           <td><button class="ghost small" onclick="eliminaTitolo('${t.id}','${tipo}','${sezioneId}')">Elimina</button></td>
         </tr>`).join('')}
         <tr>
-          <td><input id="nt-ean-${sezioneId}" placeholder="EAN"></td>
           <td></td>
+          <td><input id="nt-ean-${sezioneId}" placeholder="EAN"></td>
           <td><input id="nt-titolo-${sezioneId}" placeholder="Titolo"></td>
           <td><input id="nt-autore-${sezioneId}" placeholder="Autore"></td>
           <td><input id="nt-editore-${sezioneId}" placeholder="Editore"></td>
