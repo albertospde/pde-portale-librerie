@@ -401,13 +401,20 @@ async function renderSezioneLibraio(){
   const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('titolo');
   const cont = document.getElementById('titoli-container');
   if(!titoli || titoli.length===0){ cont.innerHTML = '<div class="card empty">Nessun titolo in questa sezione.</div>'; return; }
+  const isGiro = tipo === 'giro';
   cont.innerHTML = `<div class="titoli-grid">${titoli.map(t=>{
     const inCart = state.cart.find(c=>c.ean===t.ean);
     const qty = inCart ? inCart.quantita : 0;
+    const iconaHtml = isGiro
+      ? `<button class="ghost small" title="Apri PDF" onclick="window.open('${PDF_BUCKET_URL}${encodeURIComponent(t.ean)}.pdf','_blank')">📄</button>`
+      : `<img src="${coverUrl(t.ean)}" alt="" style="width:34px;height:48px;object-fit:cover;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.25)" onerror="this.replaceWith(Object.assign(document.createElement('span'),{textContent:'📕',style:'font-size:26px'}))">`;
     return `<div class="titolo-row">
+      <div style="flex-shrink:0;width:38px;display:flex;justify-content:center">${iconaHtml}</div>
       <div class="titolo-info">
         <div class="t">${esc(t.titolo)}</div>
-        <div class="m">EAN ${esc(t.ean)} ${t.editore?'· '+esc(t.editore):''} ${t.prezzo?'· € '+Number(t.prezzo).toFixed(2):''}</div>
+        <div class="m">EAN ${esc(t.ean)} ${t.autore?'· '+esc(t.autore):''} ${t.editore?'· '+esc(t.editore):''} ${t.prezzo?'· € '+Number(t.prezzo).toFixed(2):''}</div>
+        ${t.note?`<div class="m">Note: ${esc(t.note)}</div>`:''}
+        ${t.gemelli?`<div class="m">Gemelli: ${esc(t.gemelli)}</div>`:''}
       </div>
       <div class="qty-box">
         <button class="ghost small" onclick="changeQty('${t.ean}', ${JSON.stringify(t.titolo).replace(/"/g,'&quot;')}, '${t.editore||''}', ${t.prezzo||0}, -1)">−</button>
@@ -633,18 +640,88 @@ async function renderAdminSezioniList(){
     </div>
     ${(sezioni||[]).map(s=>`
       <div class="card" style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
           <div><b>${esc(s.nome)}</b> ${s.data_scadenza?`<span class="m" style="color:var(--testo-lieve);font-size:12px">scad. ${fmtDate(s.data_scadenza)}</span>`:''}</div>
-          <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="ghost small" onclick="scaricaModelloTitoli()">⬇ Modello Excel</button>
+            <label class="ghost small" style="cursor:pointer;display:inline-flex;align-items:center">
+              ⬆ Importa Excel
+              <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="importaTitoliExcel(event,'${tipo}','${s.id}')">
+            </label>
             <button class="ghost small" onclick="toggleSezioneAttiva('${tabellaMap[tipo]}','${s.id}',${!s.attivo})">${s.attivo?'Disattiva':'Attiva'}</button>
             <button class="ghost small" onclick="eliminaSezione('${tabellaMap[tipo]}','${s.id}')">Elimina</button>
           </div>
         </div>
+        <div id="import-status-${s.id}"></div>
         <div id="titoli-admin-${s.id}"></div>
       </div>
     `).join('')}
   `;
   (sezioni||[]).forEach(s => renderTitoliAdmin(tipo, s.id));
+}
+
+function scaricaModelloTitoli(){
+  const rows = [{ EAN:'9788807970207', Titolo:'Titolo di esempio', Autore:'Nome Autore', Editore:'Editore', Prezzo:18.5, Note:'', Gemelli:'' }];
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Titoli');
+  XLSX.writeFile(wb, 'modello_import_titoli.xlsx');
+}
+
+async function importaTitoliExcel(event, tipo, sezioneId){
+  const file = event.target.files[0];
+  if(!file) return;
+  const statusEl = document.getElementById('import-status-'+sezioneId);
+  statusEl.innerHTML = '<div class="msg info">Importazione in corso...</div>';
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+
+    const norm = s => s.toString().trim().toLowerCase();
+    const getVal = (row, ...keys) => {
+      for(const k of Object.keys(row)){
+        if(keys.includes(norm(k))) return row[k];
+      }
+      return '';
+    };
+
+    const daInserire = [];
+    let scartate = 0;
+    rows.forEach(row=>{
+      const ean = getVal(row,'ean').toString().trim();
+      const titolo = getVal(row,'titolo').toString().trim();
+      if(!ean || !titolo){ scartate++; return; }
+      daInserire.push({
+        sezione_tipo: tipo,
+        sezione_id: sezioneId,
+        ean,
+        titolo,
+        autore: getVal(row,'autore').toString().trim() || null,
+        editore: getVal(row,'editore').toString().trim() || null,
+        prezzo: getVal(row,'prezzo') !== '' ? Number(getVal(row,'prezzo')) : null,
+        note: getVal(row,'note').toString().trim() || null,
+        gemelli: getVal(row,'gemelli').toString().trim() || null,
+      });
+    });
+
+    if(daInserire.length === 0){
+      statusEl.innerHTML = '<div class="msg err">Nessuna riga valida trovata (servono almeno le colonne EAN e Titolo).</div>';
+      return;
+    }
+
+    const CHUNK = 500;
+    for(let i=0; i<daInserire.length; i+=CHUNK){
+      const { error } = await sb.from('titoli').insert(daInserire.slice(i, i+CHUNK));
+      if(error){ statusEl.innerHTML = `<div class="msg err">Errore durante l'importazione: ${esc(error.message)}</div>`; return; }
+    }
+    statusEl.innerHTML = `<div class="msg ok">Importati ${daInserire.length} titoli${scartate?` (${scartate} righe scartate per EAN/Titolo mancante)`:''}.</div>`;
+    renderTitoliAdmin(tipo, sezioneId);
+  }catch(e){
+    statusEl.innerHTML = `<div class="msg err">Errore lettura file: ${esc(e.message)}</div>`;
+  }
+  event.target.value = '';
 }
 
 async function creaSezione(){
