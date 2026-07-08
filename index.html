@@ -132,6 +132,16 @@
   .modal-box h3{margin-top:0;}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .close-x{position:absolute;top:16px;right:20px;background:transparent;color:var(--testo-lieve);font-size:20px;padding:2px 8px;}
+
+  /* BANNER & LOCANDINA sezione */
+  .banner-sezione{width:100%;max-height:260px;object-fit:cover;border-radius:var(--radius);margin-bottom:18px;display:block;}
+  .locandina-download{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;background:#fff;border:1px solid var(--azzurro);color:var(--azzurro);border-radius:8px;text-decoration:none;font-size:13.5px;font-weight:600;margin-bottom:18px;}
+  .locandina-download:hover{background:#e1f6fd;}
+  .admin-materiali-row{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:12px;padding:12px;background:var(--grigio-bg);border-radius:8px;}
+  .admin-materiali-item{flex:1;min-width:200px;}
+  .admin-materiali-item label{margin-bottom:5px;}
+  .admin-materiali-preview{font-size:12px;color:var(--testo-lieve);margin-top:5px;}
+  .admin-materiali-preview a{color:var(--azzurro);}
 </style>
 </head>
 <body>
@@ -417,6 +427,7 @@ async function renderSezioneLibraio(){
     <h1>${titolo}</h1>
     <div class="subtitle">Seleziona una sezione e aggiungi i titoli al carrello</div>
     <div class="sezioni-picker" id="sezioni-picker"></div>
+    <div id="materiali-sezione-libraio"></div>
     <div id="titoli-container"></div>
   `;
   const picker = document.getElementById('sezioni-picker');
@@ -427,6 +438,7 @@ async function renderSezioneLibraio(){
     chip.onclick = () => { state.sezioneAttiva = s.id; state.catalogoPage = 1; renderSezioneLibraio(); };
     picker.appendChild(chip);
   });
+  if(tipo==='giro' || tipo==='campagna') renderMaterialiSezioneLibraio(tipo, state.sezioneAttiva);
 
   // ordine di inserimento (created_at), non modificabile/ordinabile dall'utente
   const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('created_at', { ascending:true });
@@ -849,12 +861,16 @@ async function renderAdminSezioniList(){
             <button class="ghost small" onclick="eliminaSezione('${tabellaMap[tipo]}','${s.id}')">Elimina</button>
           </div>
         </div>
+        <div id="materiali-admin-${s.id}"></div>
         <div id="import-status-${s.id}"></div>
         <div id="titoli-admin-${s.id}"></div>
       </div>
     `).join('')}
   `;
-  (sezioni||[]).forEach(s => renderTitoliAdmin(tipo, s.id));
+  (sezioni||[]).forEach(s => {
+    renderTitoliAdmin(tipo, s.id);
+    if(tipo==='giro' || tipo==='campagna') renderAdminMaterialiBox(tipo, s.id);
+  });
 }
 
 function scaricaModelloTitoli(){
@@ -944,6 +960,92 @@ async function eliminaSezione(tabella, id){
 
 const PDF_BUCKET_URL = 'https://pvsoijmopdqozvutgtdm.supabase.co/storage/v1/object/public/giro-pdf/';
 function coverUrl(ean){ return `https://www.ibs.it/images/${ean}_0_0_0_300_75.jpg`; }
+
+/* ================= MATERIALI SEZIONE (banner + locandina) ================= */
+const BUCKET_MATERIALI = 'materiali-sezione';
+
+async function uploadMateriale(file, sezioneTipo, sezioneId, tipo){
+  const estensione = file.name.split('.').pop();
+  const path = `${sezioneTipo}/${sezioneId}/${tipo}.${estensione}`;
+  const { error: uploadError } = await sb.storage.from(BUCKET_MATERIALI).upload(path, file, { upsert:true });
+  if(uploadError) throw uploadError;
+  const { data:{ publicUrl } } = sb.storage.from(BUCKET_MATERIALI).getPublicUrl(path);
+  const { error: dbError } = await sb.from('materiali_sezione').upsert({
+    sezione_tipo: sezioneTipo, sezione_id: sezioneId, tipo,
+    url: publicUrl, nome_file: file.name, updated_at: new Date().toISOString()
+  }, { onConflict: 'sezione_tipo,sezione_id,tipo' });
+  if(dbError) throw dbError;
+  return publicUrl;
+}
+async function getMaterialiSezione(sezioneTipo, sezioneId){
+  const { data } = await sb.from('materiali_sezione').select('*').eq('sezione_tipo', sezioneTipo).eq('sezione_id', sezioneId);
+  const result = { banner:null, locandina:null };
+  (data||[]).forEach(m => result[m.tipo] = m);
+  return result;
+}
+async function eliminaMateriale(sezioneTipo, sezioneId, tipo){
+  await sb.from('materiali_sezione').delete().match({ sezione_tipo:sezioneTipo, sezione_id:sezioneId, tipo });
+}
+
+/* Mostra banner + eventuale locandina nella vista libraio, sopra la griglia titoli */
+async function renderMaterialiSezioneLibraio(sezioneTipo, sezioneId){
+  const cont = document.getElementById('materiali-sezione-libraio');
+  if(!cont || !sezioneId) return;
+  const m = await getMaterialiSezione(sezioneTipo, sezioneId);
+  let html = '';
+  if(m.banner) html += `<img src="${m.banner.url}" alt="Banner" class="banner-sezione">`;
+  if(m.locandina) html += `<a href="${m.locandina.url}" target="_blank" rel="noopener noreferrer" download="${esc(m.locandina.nome_file||'locandina.pdf')}" class="locandina-download">📄 Scarica locandina</a>`;
+  cont.innerHTML = html;
+}
+
+/* Blocco upload per l'admin, iniettato dentro ogni card sezione */
+async function renderAdminMaterialiBox(sezioneTipo, sezioneId){
+  const cont = document.getElementById('materiali-admin-'+sezioneId);
+  if(!cont) return;
+  const mostraLocandina = sezioneTipo === 'campagna';
+  cont.innerHTML = `
+    <div class="admin-materiali-row">
+      <div class="admin-materiali-item">
+        <label>Banner sezione (immagine)</label>
+        <input type="file" accept="image/*" id="input-banner-${sezioneId}">
+        <div class="admin-materiali-preview" id="preview-banner-${sezioneId}">caricamento...</div>
+      </div>
+      ${mostraLocandina ? `
+      <div class="admin-materiali-item">
+        <label>Locandina campagna (PDF)</label>
+        <input type="file" accept="application/pdf" id="input-locandina-${sezioneId}">
+        <div class="admin-materiali-preview" id="preview-locandina-${sezioneId}">caricamento...</div>
+      </div>` : ''}
+    </div>
+  `;
+  const m = await getMaterialiSezione(sezioneTipo, sezioneId);
+  document.getElementById('preview-banner-'+sezioneId).innerHTML = m.banner
+    ? `<a href="${m.banner.url}" target="_blank">banner attuale ✓</a> · <button class="ghost small" onclick="rimuoviMateriale('${sezioneTipo}','${sezioneId}','banner')">rimuovi</button>`
+    : 'Nessun banner caricato.';
+  if(mostraLocandina){
+    document.getElementById('preview-locandina-'+sezioneId).innerHTML = m.locandina
+      ? `<a href="${m.locandina.url}" target="_blank">${esc(m.locandina.nome_file)} ✓</a> · <button class="ghost small" onclick="rimuoviMateriale('${sezioneTipo}','${sezioneId}','locandina')">rimuovi</button>`
+      : 'Nessuna locandina caricata.';
+  }
+
+  document.getElementById('input-banner-'+sezioneId).addEventListener('change', async (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    try{ await uploadMateriale(file, sezioneTipo, sezioneId, 'banner'); renderAdminMaterialiBox(sezioneTipo, sezioneId); }
+    catch(err){ alert('Errore upload banner: '+err.message); }
+  });
+  if(mostraLocandina){
+    document.getElementById('input-locandina-'+sezioneId).addEventListener('change', async (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      try{ await uploadMateriale(file, sezioneTipo, sezioneId, 'locandina'); renderAdminMaterialiBox(sezioneTipo, sezioneId); }
+      catch(err){ alert('Errore upload locandina: '+err.message); }
+    });
+  }
+}
+async function rimuoviMateriale(sezioneTipo, sezioneId, tipo){
+  if(!confirm('Rimuovere questo file?')) return;
+  await eliminaMateriale(sezioneTipo, sezioneId, tipo);
+  renderAdminMaterialiBox(sezioneTipo, sezioneId);
+}
 
 async function renderTitoliAdmin(tipo, sezioneId){
   const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', sezioneId).order('created_at', { ascending:true });
