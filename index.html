@@ -438,7 +438,7 @@ async function renderSezioneLibraio(){
     chip.onclick = () => { state.sezioneAttiva = s.id; state.catalogoPage = 1; renderSezioneLibraio(); };
     picker.appendChild(chip);
   });
-  if(tipo==='giro' || tipo==='campagna') renderMaterialiSezioneLibraio(tipo, state.sezioneAttiva);
+  renderMaterialiSezioneLibraio(tipo, state.sezioneAttiva);
 
   // ordine di inserimento (created_at), non modificabile/ordinabile dall'utente
   const { data: titoli } = await sb.from('titoli').select('*').eq('sezione_tipo', tipo).eq('sezione_id', state.sezioneAttiva).order('created_at', { ascending:true });
@@ -476,7 +476,7 @@ function toggleEditoreFiltro(ed){
   state.catalogoPage = 1;
   renderCatalogoGrid();
 }
-const TITOLI_PER_PAGINA = 20;
+const TITOLI_PER_PAGINA = 15;
 function renderCatalogoGrid(){
   const isGiro = state.sezioneTipo === 'giro';
   const q = (state.catalogoSearch||'').trim().toLowerCase();
@@ -869,7 +869,7 @@ async function renderAdminSezioniList(){
   `;
   (sezioni||[]).forEach(s => {
     renderTitoliAdmin(tipo, s.id);
-    if(tipo==='giro' || tipo==='campagna') renderAdminMaterialiBox(tipo, s.id);
+    renderAdminMaterialiBox(tipo, s.id);
   });
 }
 
@@ -1002,37 +1002,44 @@ async function renderMaterialiSezioneLibraio(sezioneTipo, sezioneId){
 async function renderAdminMaterialiBox(sezioneTipo, sezioneId){
   const cont = document.getElementById('materiali-admin-'+sezioneId);
   if(!cont) return;
-  const mostraLocandina = sezioneTipo === 'campagna';
+  const mostraBanner = sezioneTipo === 'giro' || sezioneTipo === 'campagna';
+  const mostraLocandina = sezioneTipo === 'campagna' || sezioneTipo === 'proposta';
+  if(!mostraBanner && !mostraLocandina){ cont.innerHTML = ''; return; }
   cont.innerHTML = `
     <div class="admin-materiali-row">
+      ${mostraBanner ? `
       <div class="admin-materiali-item">
         <label>Banner sezione (immagine)</label>
         <input type="file" accept="image/*" id="input-banner-${sezioneId}">
         <div class="admin-materiali-preview" id="preview-banner-${sezioneId}">caricamento...</div>
-      </div>
+      </div>` : ''}
       ${mostraLocandina ? `
       <div class="admin-materiali-item">
-        <label>Locandina campagna (PDF)</label>
+        <label>Locandina (PDF)</label>
         <input type="file" accept="application/pdf" id="input-locandina-${sezioneId}">
         <div class="admin-materiali-preview" id="preview-locandina-${sezioneId}">caricamento...</div>
       </div>` : ''}
     </div>
   `;
   const m = await getMaterialiSezione(sezioneTipo, sezioneId);
-  document.getElementById('preview-banner-'+sezioneId).innerHTML = m.banner
-    ? `<a href="${m.banner.url}" target="_blank">banner attuale ✓</a> · <button class="ghost small" onclick="rimuoviMateriale('${sezioneTipo}','${sezioneId}','banner')">rimuovi</button>`
-    : 'Nessun banner caricato.';
+  if(mostraBanner){
+    document.getElementById('preview-banner-'+sezioneId).innerHTML = m.banner
+      ? `<a href="${m.banner.url}" target="_blank">banner attuale ✓</a> · <button class="ghost small" onclick="rimuoviMateriale('${sezioneTipo}','${sezioneId}','banner')">rimuovi</button>`
+      : 'Nessun banner caricato.';
+  }
   if(mostraLocandina){
     document.getElementById('preview-locandina-'+sezioneId).innerHTML = m.locandina
       ? `<a href="${m.locandina.url}" target="_blank">${esc(m.locandina.nome_file)} ✓</a> · <button class="ghost small" onclick="rimuoviMateriale('${sezioneTipo}','${sezioneId}','locandina')">rimuovi</button>`
       : 'Nessuna locandina caricata.';
   }
 
-  document.getElementById('input-banner-'+sezioneId).addEventListener('change', async (e)=>{
-    const file = e.target.files[0]; if(!file) return;
-    try{ await uploadMateriale(file, sezioneTipo, sezioneId, 'banner'); renderAdminMaterialiBox(sezioneTipo, sezioneId); }
-    catch(err){ alert('Errore upload banner: '+err.message); }
-  });
+  if(mostraBanner){
+    document.getElementById('input-banner-'+sezioneId).addEventListener('change', async (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      try{ await uploadMateriale(file, sezioneTipo, sezioneId, 'banner'); renderAdminMaterialiBox(sezioneTipo, sezioneId); }
+      catch(err){ alert('Errore upload banner: '+err.message); }
+    });
+  }
   if(mostraLocandina){
     document.getElementById('input-locandina-'+sezioneId).addEventListener('change', async (e)=>{
       const file = e.target.files[0]; if(!file) return;
