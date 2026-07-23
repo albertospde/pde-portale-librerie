@@ -57,6 +57,10 @@
   .badge.inviato{background:#e1ecff;color:#2557d6;}
   .badge.elaborato{background:#fff3cd;color:#8a6d00;}
   .badge.scaricato{background:#d9f3e2;color:var(--verde);}
+  #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#1a2332;color:#fff;padding:12px 20px;border-radius:8px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:999;max-width:90vw;}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+  #toast.show.error{background:var(--rosso);}
+  #toast.show.success{background:var(--verde);}
 
   /* AUTH SCREEN */
   #auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
@@ -187,6 +191,8 @@
 </head>
 <body>
 
+<div id="toast"></div>
+
 <!-- ======================= AUTH SCREEN ======================= -->
 <div id="auth-screen">
   <div class="auth-box">
@@ -273,6 +279,15 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 // client "usa e getta" per creare utenze senza toccare la sessione admin corrente
 const supabaseAction = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
+// Secondo progetto Supabase: quello di BookUp/rpn-sync. Serve solo per gli
+// admin che caricano ordini direttamente su RPN dalla sezione Ordini,
+// riusando l'account RPN già collegato in BookUp (tabella rpn_credentials).
+// storageKey dedicato per non entrare in conflitto con la sessione "sb" sopra.
+const SUPABASE_URL_RPN = "https://tdflwenlylhctxssatax.supabase.co";
+const SUPABASE_ANON_KEY_RPN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkZmx3ZW5seWxoY3R4c3NhdGF4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYzMzgyNzYsImV4cCI6MjA5MTkxNDI3Nn0.l35qEL7LOvyYuI1McQlVqj4vbyTqmlevcmqWbTGYi2Q";
+const sbRpn = window.supabase.createClient(SUPABASE_URL_RPN, SUPABASE_ANON_KEY_RPN, { auth: { storageKey: 'sb-rpn-auth' } });
+const RPN_PROXY_BASE = "https://tdflwenlylhctxssatax.supabase.co/functions/v1/rpn-sync";
+
 /* ================= STATE ================= */
 let state = {
   session: null,
@@ -284,6 +299,9 @@ let state = {
   cart: [],            // {ean, titolo, editore, prezzo, quantita}
   chatWith: null,      // libreria_id (per admin) 
   chatChannel: null,
+  rpnConnected: false, // sessione Supabase sul progetto BookUp attiva?
+  rpnEmail: '',
+  ordiniTab: null,
 };
 
 /* ================= UTIL ================= */
@@ -1227,24 +1245,78 @@ async function eliminaTitolo(id, tipo, sezioneId){
   renderTitoliAdmin(tipo, sezioneId);
 }
 
-/* --- ADMIN ORDINI + EXPORT --- */
+/* --- ADMIN ORDINI + CARICO DIRETTO SU RPN --- */
 async function renderAdminOrdini(){
   const main = document.getElementById('main');
   if(!state.ordiniTab) state.ordiniTab = 'attivi';
   main.innerHTML = `
     <h1>Ordini</h1>
     <div class="subtitle">Ordini ricevuti dalle librerie</div>
+    <div id="rpn-connect-widget" class="card" style="margin-bottom:14px"></div>
     <div class="sezioni-picker">
-      <div class="sezione-chip ${state.ordiniTab==='attivi'?'active':''}" onclick="state.ordiniTab='attivi';renderAdminOrdiniList()">Da scaricare</div>
-      <div class="sezione-chip ${state.ordiniTab==='scaricati'?'active':''}" onclick="state.ordiniTab='scaricati';renderAdminOrdiniList()">Scaricati</div>
+      <div class="sezione-chip ${state.ordiniTab==='attivi'?'active':''}" onclick="state.ordiniTab='attivi';renderAdminOrdiniList()">Da caricare</div>
+      <div class="sezione-chip ${state.ordiniTab==='scaricati'?'active':''}" onclick="state.ordiniTab='scaricati';renderAdminOrdiniList()">Caricati</div>
     </div>
     <div class="toolbar">
-      <button class="dark" onclick="scaricaSelezionati()">⬇ Scarica selezionati (Excel per RPN)</button>
+      <button class="dark" id="btn-carica-selezionati" onclick="verificaECaricaSelezionati()" disabled>🔗 Verifica e carica su RPN</button>
+      <button class="ghost small" onclick="esportaBackupSelezionati()">⬇ Solo Excel (backup, non carica)</button>
     </div>
     <div id="ordini-admin-list"></div>
   `;
+  await renderRpnConnectWidget();
   await renderAdminOrdiniList();
 }
+
+/* ---- Sessione RPN (progetto BookUp) ---- */
+async function renderRpnConnectWidget(){
+  const { data: { session } } = await sbRpn.auth.getSession();
+  const wrap = document.getElementById('rpn-connect-widget');
+  if(!wrap) return;
+  if(session){
+    state.rpnConnected = true;
+    state.rpnEmail = session.user.email;
+    wrap.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>🔗 Collegato a RPN come <b>${esc(state.rpnEmail)}</b></span>
+      <button class="ghost small" onclick="disconnectRpnSession()">Scollega</button>
+    </div>`;
+  } else {
+    state.rpnConnected = false;
+    wrap.innerHTML = `<div>
+      <p style="margin:0 0 8px;font-size:13px;color:var(--testo-lieve)">Per caricare gli ordini direttamente su RPN accedi con il tuo account BookUp (lo stesso che usi per Prenota). Va fatto una sola volta per browser.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input id="rpn-login-email" type="email" placeholder="Email BookUp" style="flex:1;min-width:200px">
+        <input id="rpn-login-pw" type="password" placeholder="Password" style="flex:1;min-width:160px">
+        <button class="primary" onclick="connectRpnSession()">Accedi</button>
+      </div>
+      <div id="rpn-login-err" style="color:var(--rosso);font-size:12px;margin-top:6px"></div>
+    </div>`;
+  }
+  const btn = document.getElementById('btn-carica-selezionati');
+  if(btn) btn.disabled = !state.rpnConnected;
+}
+async function connectRpnSession(){
+  const email = document.getElementById('rpn-login-email').value.trim();
+  const password = document.getElementById('rpn-login-pw').value;
+  const errEl = document.getElementById('rpn-login-err');
+  errEl.textContent = '';
+  if(!email || !password){ errEl.textContent = 'Inserisci email e password.'; return; }
+  const { error } = await sbRpn.auth.signInWithPassword({ email, password });
+  if(error){ errEl.textContent = 'Accesso fallito: ' + error.message; return; }
+  await renderRpnConnectWidget();
+  showRpnToast('Collegato a RPN.');
+}
+async function disconnectRpnSession(){
+  await sbRpn.auth.signOut({ scope: 'local' });
+  await renderRpnConnectWidget();
+}
+function showRpnToast(msg, isError){
+  const el = document.getElementById('toast');
+  if(!el){ alert(msg); return; }
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : ' success');
+  setTimeout(()=>{ el.className = 'toast'; }, 3500);
+}
+
 async function renderAdminOrdiniList(){
   document.querySelectorAll('.sezione-chip').forEach(c=>c.classList.remove('active'));
   const isScaricati = state.ordiniTab === 'scaricati';
@@ -1258,7 +1330,7 @@ async function renderAdminOrdiniList(){
   });
 
   const cont = document.getElementById('ordini-admin-list');
-  if(!ordini || ordini.length===0){ cont.innerHTML = `<div class="card empty">Nessun ordine ${isScaricati?'scaricato':'da scaricare'}.</div>`; return; }
+  if(!ordini || ordini.length===0){ cont.innerHTML = `<div class="card empty">Nessun ordine ${isScaricati?'caricato':'da caricare'}.</div>`; return; }
   const valoreOrdine = o => o.ordini_dettaglio.reduce((s,d)=> s + (d.prezzo||0)*d.quantita, 0);
   const totaleGenerale = ordini.reduce((s,o)=> s + valoreOrdine(o), 0);
   cont.innerHTML = `<table><thead><tr><th><input type="checkbox" onclick="toggleAllOrdini(this)"></th><th>N. Ordine</th><th>Libreria</th><th>Sezione</th><th>Righe</th><th>Valore (lordo sconto)</th><th>Data</th><th>Stato</th><th></th></tr></thead><tbody>
@@ -1270,11 +1342,11 @@ async function renderAdminOrdiniList(){
       <td>${o.ordini_dettaglio.length}</td>
       <td style="font-weight:600">€ ${valoreOrdine(o).toFixed(2)}</td>
       <td>${fmtDateTime(o.created_at)}</td>
-      <td><span class="badge ${o.stato}">${o.stato}</span></td>
-      <td><button class="ghost small" onclick='scaricaOrdine(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Scarica</button></td>
+      <td><span class="badge ${o.stato==='scaricato'?'scaricato':o.stato}">${o.stato==='scaricato'?'caricato':o.stato}</span></td>
+      <td><button class="ghost small" ${state.rpnConnected?'':'disabled'} onclick='verificaECaricaOrdine(${JSON.stringify(o).replace(/'/g,"&#39;")})'>Carica su RPN</button></td>
     </tr>`).join('')}
   </tbody></table>
-  <div style="text-align:right;margin-top:10px;font-size:14px"><b>Totale ${isScaricati?'scaricati':'da scaricare'}: € ${totaleGenerale.toFixed(2)}</b> <span style="color:var(--testo-lieve);font-size:12px">(al lordo dello sconto)</span></div>`;
+  <div style="text-align:right;margin-top:10px;font-size:14px"><b>Totale ${isScaricati?'caricati':'da caricare'}: € ${totaleGenerale.toFixed(2)}</b> <span style="color:var(--testo-lieve);font-size:12px">(al lordo dello sconto)</span></div>`;
 }
 function toggleAllOrdini(cb){ document.querySelectorAll('.ordine-check').forEach(c=>c.checked = cb.checked); }
 
@@ -1310,26 +1382,118 @@ function buildExportRows(ordini){
   });
   return rows;
 }
-async function scaricaOrdine(ordine){
-  const rows = buildExportRows([ordine]);
-  esportaExcel(rows, `rpn_ordine_${ordine.numero_ordine}`);
-  await sb.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).eq('id', ordine.id);
-  renderAdminOrdiniList();
-}
-async function scaricaSelezionati(){
-  const ids = [...document.querySelectorAll('.ordine-check:checked')].map(c=>c.value);
-  if(ids.length===0){ alert('Seleziona almeno un ordine.'); return; }
-  const { data: ordini } = await sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ids);
-  const rows = buildExportRows(ordini);
-  esportaExcel(rows, `rpn_upload_${todayISO()}`);
-  await sb.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).in('id', ids);
-  renderAdminOrdiniList();
-}
 function esportaExcel(rows, filename){
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Ordini');
   XLSX.writeFile(wb, `${filename}.xlsx`);
+}
+// Export manuale di backup: NON tocca lo stato dell'ordine, serve solo come
+// rete di sicurezza se il caricamento diretto su RPN non fosse disponibile.
+async function esportaBackupSelezionati(){
+  const ids = [...document.querySelectorAll('.ordine-check:checked')].map(c=>c.value);
+  if(ids.length===0){ alert('Seleziona almeno un ordine.'); return; }
+  const { data: ordini } = await sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ids);
+  esportaExcel(buildExportRows(ordini), `rpn_backup_${todayISO()}`);
+}
+
+/* ---- Caricamento diretto su RPN (via rpn-sync, stesso endpoint di BookUp) ---- */
+function buildRpnFile(ordini){
+  const rows = buildExportRows(ordini);
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  const buf = XLSX.write(wb, { type:'array', bookType:'xlsx' });
+  return new File([buf], 'ordini_rpn.xlsx', { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+async function rpnUploadFile(path, file){
+  const { data: { session } } = await sbRpn.auth.getSession();
+  if(!session) throw new Error('Sessione RPN non attiva: accedi prima con il tuo account BookUp.');
+  const fd = new FormData();
+  fd.append('csv_file', file);
+  const res = await fetch(`${RPN_PROXY_BASE}/${path}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${session.access_token}` },
+    body: fd,
+  });
+  const data = await res.json().catch(()=>({}));
+  if(!res.ok){
+    const err = new Error(data.message || data.error || `Errore ${res.status}`);
+    err.status = res.status; err.payload = data;
+    throw err;
+  }
+  return data;
+}
+function pickRpnRowFields(r){
+  const ean = r.ean ?? r.EAN ?? r.ean13 ?? '';
+  const libreria = r.libraryCode ?? r.codiceCliente ?? r.libreria ?? r.library ?? '';
+  const cedola = r.cedola ?? r.cedolaNome ?? r.nCedola ?? r['N° cedola'] ?? '';
+  const oldQ = r.oldQuantity ?? r.quantitaAttuale ?? r.currentQuantity ?? '';
+  const newQ = r.newQuantity ?? r.qta ?? r.quantity ?? r['Pren (Qtà)'] ?? '';
+  return { ean, libreria, cedola, oldQ, newQ };
+}
+
+function verificaECaricaSelezionati(){
+  const ids = [...document.querySelectorAll('.ordine-check:checked')].map(c=>c.value);
+  if(ids.length===0){ alert('Seleziona almeno un ordine.'); return; }
+  avviaVerificaCarico(ids);
+}
+function verificaECaricaOrdine(ordine){
+  avviaVerificaCarico([ordine.id]);
+}
+async function avviaVerificaCarico(ids){
+  if(!state.rpnConnected){ showRpnToast('Accedi prima con il tuo account BookUp.', true); return; }
+  const { data: ordini } = await sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ids);
+  if(!ordini || !ordini.length) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal-box" style="max-width:640px">
+    <h3>Verifica su RPN in corso...</h3>
+    <p style="color:var(--testo-lieve);font-size:13px">Sto confrontando titoli e quantità con RPN, senza ancora caricare nulla.</p>
+  </div>`;
+  document.body.appendChild(overlay);
+  try {
+    const file = buildRpnFile(ordini);
+    const result = await rpnUploadFile('upload-prenotazioni?confirmed=false', file);
+    const righe = (result.saved && result.saved.length ? result.saved : result.data) || [];
+    const nonConnected = result.nonConnected || [];
+    renderVerificaCaricoModal(overlay, ordini, righe, nonConnected);
+  } catch(e){
+    overlay.remove();
+    if(e.status === 428){ showRpnToast('Account RPN scollegato o token scaduto: ricollegalo da BookUp.', true); }
+    else showRpnToast('Errore nella verifica: ' + e.message, true);
+  }
+}
+function renderVerificaCaricoModal(overlay, ordini, righe, nonConnected){
+  const numOrdini = ordini.map(o=>`#${o.numero_ordine}`).join(', ');
+  overlay.innerHTML = `<div class="modal-box" style="max-width:640px;max-height:80vh;overflow:auto">
+    <h3>Verifica prima del carico su RPN</h3>
+    <p style="font-size:13px;color:var(--testo-lieve);margin-top:0">Ordini ${esc(numOrdini)} — controlla titoli e quantità, poi conferma.</p>
+    ${righe.length ? `<table style="width:100%;font-size:13px"><thead><tr><th>EAN</th><th>Cliente</th><th>Cedola</th><th>Qtà attuale</th><th>Qtà nuova</th></tr></thead><tbody>
+      ${righe.map(r=>{ const f = pickRpnRowFields(r); return `<tr><td>${esc(f.ean)}</td><td>${esc(f.libreria)}</td><td>${esc(f.cedola)}</td><td>${esc(f.oldQ)}</td><td><b>${esc(f.newQ)}</b></td></tr>`; }).join('')}
+    </tbody></table>` : `<p>Nessuna riga riconosciuta da RPN.</p>`}
+    ${nonConnected.length ? `<p style="color:var(--rosso);font-size:13px;margin-top:10px">⚠️ ${nonConnected.length} riga/righe NON agganciate su RPN (EAN, cedola o cliente da controllare): non verranno caricate.</p>` : ''}
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="ghost" style="flex:1" onclick="this.closest('.modal-overlay').remove()">Annulla</button>
+      <button class="primary" style="flex:1" ${righe.length ? '' : 'disabled'} onclick='confermaCaricoRpn(${JSON.stringify(ordini.map(o=>o.id))})'>✅ Conferma e carica</button>
+    </div>
+  </div>`;
+}
+async function confermaCaricoRpn(ordineIds){
+  const overlay = document.querySelector('.modal-overlay');
+  const { data: ordini } = await sb.from('ordini').select('*, librerie(ragione_sociale, cod_cliente), ordini_dettaglio(*)').in('id', ordineIds);
+  try {
+    const file = buildRpnFile(ordini);
+    const result = await rpnUploadFile('upload-prenotazioni?confirmed=true', file);
+    const saved = (result.saved && result.saved.length ? result.saved : result.data) || [];
+    await sb.from('ordini').update({ stato:'scaricato', scaricato_at: new Date().toISOString() }).in('id', ordineIds);
+    overlay?.remove();
+    showRpnToast(`✅ Caricati su RPN: ${saved.length} titoli aggiornati.`);
+    renderAdminOrdiniList();
+  } catch(e){
+    if(e.status === 428){ showRpnToast('Account RPN scollegato o token scaduto: ricollegalo da BookUp.', true); }
+    else showRpnToast('Errore durante il carico: ' + e.message, true);
+  }
 }
 
 /* --- ADMIN CHAT --- */
